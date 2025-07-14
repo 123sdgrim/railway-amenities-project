@@ -46,15 +46,12 @@ zone_code_to_name = {
 # ---------------------- LOAD & PREP DATA ----------------------
 
 df = pd.read_csv("station_level_data_output.csv")
-
-# Clean zone/div
 df["STATION_ZONE"] = df["STATION_ZONE"].astype(str).str.strip()
 df["STATION_DIV"] = df["STATION_DIV"].astype(str).str.strip()
-
 df["STATION_DIV_NAME"] = df["STATION_DIV"].map(div_code_to_name).fillna(df["STATION_DIV"])
 df["STATION_ZONE_NAME"] = df["STATION_ZONE"].map(zone_code_to_name).fillna(df["STATION_ZONE"])
 
-# Fix ALL_AMENITIES list formatting
+# Fix amenity list display
 def format_amenity_list(lst):
     return "\n".join(eval(lst)) if isinstance(lst, str) and lst.startswith("[") else str(lst)
 
@@ -74,22 +71,18 @@ with st.sidebar:
     if div_filter != "All":
         filtered_df = filtered_df[filtered_df["STATION_DIV_NAME"] == div_filter]
 
-    # Prepare station options
     station_options = filtered_df[['STATION_CODE', 'STATION_NAME']].drop_duplicates()
     station_options["label"] = station_options["STATION_CODE"] + " - " + station_options["STATION_NAME"]
 
-    # Initialize session state for sync
     if "selected_code" not in st.session_state:
         st.session_state.selected_code = "All"
     if "selected_name" not in st.session_state:
         st.session_state.selected_name = "All"
 
-    # Selectbox for station code
     code_labels = ["All"] + station_options["STATION_CODE"].tolist()
     selected_code = st.selectbox("Station Code", code_labels, index=code_labels.index(st.session_state.selected_code) if st.session_state.selected_code in code_labels else 0)
     st.session_state.selected_code = selected_code
 
-    # Auto-update station name
     if selected_code != "All":
         match_name = station_options[station_options["STATION_CODE"] == selected_code]["STATION_NAME"].values[0]
         st.session_state.selected_name = match_name
@@ -98,17 +91,16 @@ with st.sidebar:
     selected_name = st.selectbox("Station Name", name_labels, index=name_labels.index(st.session_state.selected_name) if st.session_state.selected_name in name_labels else 0)
     st.session_state.selected_name = selected_name
 
-    # If name is changed manually, update code
     if selected_name != "All":
         match_code = station_options[station_options["STATION_NAME"] == selected_name]["STATION_CODE"].values[0]
         st.session_state.selected_code = match_code
 
-    # Final filter application
     if st.session_state.selected_code != "All":
         filtered_df = filtered_df[filtered_df["STATION_CODE"] == st.session_state.selected_code]
 
 # ---------------------- TABLE ----------------------
 st.markdown("### 📋 Stationwise Amenities Details")
+st.caption("Based on one month of station-level data (April 2025) provided by CRIS Delhi.")
 st.dataframe(
     filtered_df[['STATION_ZONE_NAME', 'STATION_DIV_NAME', 'STATION_CODE', 'STATION_NAME', 'TOTAL_AMENITIES', 'ALL_AMENITIES']]
     .rename(columns={
@@ -128,9 +120,7 @@ st.dataframe(
 
 # ---------------------- CHARTS ----------------------
 color_scale = alt.Scale(domain=sorted(df['STATION_ZONE_NAME'].unique()), scheme='category20')
-color_encoding = alt.Color('STATION_ZONE_NAME:N', scale=color_scale, legend=alt.Legend(title="Zone"))
 
-# Summary if specific station
 if st.session_state.selected_code != "All":
     row = filtered_df.iloc[0]
     st.markdown(f"### 🏷️ Station Summary: `{row['STATION_CODE']} - {row['STATION_NAME']}`")
@@ -143,14 +133,24 @@ else:
 
     if div_filter != "All":
         st.markdown(f"**Number of Stations in Division `{div_filter}`**: `{filtered_df['STATION_CODE'].nunique()}`")
-        chart_df = filtered_df[['STATION_CODE', 'STATION_NAME', 'STATION_ZONE_NAME', 'TOTAL_AMENITIES']]
+        chart_df = filtered_df[['STATION_CODE', 'STATION_NAME', 'STATION_ZONE_NAME', 'TOTAL_AMENITIES']].copy()
+        chart_df['STATION_CODE_CLEAN'] = chart_df['STATION_CODE'].str.replace("_", " ")
+        chart_df['STATION_NAME_CLEAN'] = chart_df['STATION_NAME'].str.replace("_", " ")
+        chart_df['ZONE_CLEAN'] = chart_df['STATION_ZONE_NAME'].str.replace("_", " ")
+
         bar = alt.Chart(chart_df).mark_bar().encode(
-            x=alt.X('STATION_CODE:N', sort='-y', title='Station Code'),
+            x=alt.X('STATION_CODE_CLEAN:N', sort='-y', title='Station Code'),
             y=alt.Y('TOTAL_AMENITIES:Q', title='Number of Amenities'),
-            tooltip=['STATION_NAME', 'STATION_CODE', 'STATION_ZONE_NAME', 'TOTAL_AMENITIES'],
+            tooltip=[
+                alt.Tooltip('STATION_NAME_CLEAN:N', title='Station Name'),
+                alt.Tooltip('STATION_CODE_CLEAN:N', title='Station Code'),
+                alt.Tooltip('ZONE_CLEAN:N', title='Zone'),
+                alt.Tooltip('TOTAL_AMENITIES:Q', title='Amenities')
+            ],
             color=alt.value("#4682b4")
         ).properties(height=400, width=700, title=f"Amenities per Station in Division: {div_filter}")
         st.altair_chart(bar, use_container_width=True)
+
         st.markdown(
             f"""
             <p style='margin-top:10px;'>
@@ -164,21 +164,31 @@ else:
     elif zone_filter != "All":
         st.markdown(f"**Number of Divisions in Zone `{zone_filter}`**: `{filtered_df['STATION_DIV_NAME'].nunique()}`")
         chart_df = filtered_df.groupby('STATION_DIV_NAME')[['TOTAL_AMENITIES']].sum().reset_index()
+        chart_df['DIVISION_CLEAN'] = chart_df['STATION_DIV_NAME'].str.replace("_", " ")
+
         bar = alt.Chart(chart_df).mark_bar().encode(
-            x=alt.X('STATION_DIV_NAME:N', sort='-y', title='Division'),
+            x=alt.X('DIVISION_CLEAN:N', sort='-y', title='Division'),
             y=alt.Y('TOTAL_AMENITIES:Q', title='Number of Amenities'),
-            tooltip=['STATION_DIV_NAME', 'TOTAL_AMENITIES'],
+            tooltip=[
+                alt.Tooltip('DIVISION_CLEAN:N', title='Division'),
+                alt.Tooltip('TOTAL_AMENITIES:Q', title='Amenities')
+            ],
             color=alt.value("#4682b4")
         ).properties(height=400, width=700, title=f"Amenities per Division in Zone: {zone_filter}")
         st.altair_chart(bar, use_container_width=True)
 
     else:
         chart_df = df.groupby('STATION_ZONE_NAME')[['TOTAL_AMENITIES']].sum().reset_index()
+        chart_df['ZONE_CLEAN'] = chart_df['STATION_ZONE_NAME'].str.replace("_", " ")
+
         bar = alt.Chart(chart_df).mark_bar().encode(
-            x=alt.X('STATION_ZONE_NAME:N', sort='-y', title='Zone'),
+            x=alt.X('ZONE_CLEAN:N', sort='-y', title='Zone'),
             y=alt.Y('TOTAL_AMENITIES:Q', title='Number of Amenities'),
-            tooltip=['STATION_ZONE_NAME', 'TOTAL_AMENITIES'],
-            color=color_encoding
+            tooltip=[
+                alt.Tooltip('ZONE_CLEAN:N', title='Zone'),
+                alt.Tooltip('TOTAL_AMENITIES:Q', title='Amenities')
+            ],
+            color=alt.Color('ZONE_CLEAN:N', scale=color_scale, legend=alt.Legend(title="Zone"))
         ).properties(height=400, width=700, title="Zone-wise Amenities Distribution")
         st.altair_chart(bar, use_container_width=True)
 
